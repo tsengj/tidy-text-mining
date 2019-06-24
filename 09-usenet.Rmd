@@ -275,7 +275,7 @@ In this example we'll use the AFINN sentiment lexicon, which provides numeric po
 newsgroup_sentiments <- words_by_newsgroup %>%
   inner_join(get_sentiments("afinn"), by = "word") %>%
   group_by(newsgroup) %>%
-  summarize(score = sum(score * n) / sum(n))
+  summarize(score = sum(value * n) / sum(n))
 
 newsgroup_sentiments %>%
   mutate(newsgroup = reorder(newsgroup, score)) %>%
@@ -296,7 +296,7 @@ contributions <- usenet_words %>%
   inner_join(get_sentiments("afinn"), by = "word") %>%
   group_by(word) %>%
   summarize(occurences = n(),
-            contribution = sum(score))
+            contribution = sum(value))
 
 contributions
 ```
@@ -319,7 +319,7 @@ We may also care about which words contributed the most *within each newsgroup*,
 ```{r top_sentiment_words, dependson = "words_by_newsgroup"}
 top_sentiment_words <- words_by_newsgroup %>%
   inner_join(get_sentiments("afinn"), by = "word") %>%
-  mutate(contribution = score * n / sum(n))
+  mutate(contribution = value * n / sum(n))
 
 top_sentiment_words
 ```
@@ -353,7 +353,7 @@ We can also try finding the most positive and negative individual messages, by g
 sentiment_messages <- usenet_words %>%
   inner_join(get_sentiments("afinn"), by = "word") %>%
   group_by(newsgroup, id) %>%
-  summarize(sentiment = mean(score),
+  summarize(sentiment = mean(value),
             words = n()) %>%
   ungroup() %>%
   filter(words >= 5)
@@ -420,7 +420,7 @@ usenet_bigram_counts %>%
   filter(word1 %in% negate_words) %>%
   count(word1, word2, wt = n, sort = TRUE) %>%
   inner_join(get_sentiments("afinn"), by = c(word2 = "word")) %>%
-  mutate(contribution = score * n) %>%
+  mutate(contribution = value * n) %>%
   group_by(word1) %>%
   top_n(10, abs(contribution)) %>%
   ungroup() %>%
