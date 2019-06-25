@@ -9,7 +9,7 @@
 ## Verifies that the required libraries get installed if needed
 verify_deps <- function(...) {
   lapply(list(...), function(lib) {
-    if (!lib %in% installed.packages()) 
+    if (!lib %in% installed.packages())
       install.packages(lib)
   })
 }
@@ -110,10 +110,10 @@ library(tidytext)
 
 data(stop_words)
 
-text_df <- 
+text_df <-
   big4_df %>%
   select(id,text) %>%
-  as_tibble() 
+  as_tibble()
 
 tidy_df <-
   text_df %>%
@@ -122,7 +122,7 @@ tidy_df <-
   mutate(word = str_replace(word, "http[^[:space:]]*", "")) %>% # function for removing URLs, i.e."http" followed by any non-space letters
   mutate(word = str_replace(word, "[^[:alpha:][:space:]]*", "")) %>% # function for removing anything other than English letters or space
   anti_join(stop_words)
-  
+
 
 library(ggplot2)
 
@@ -142,7 +142,7 @@ ggplot(big4_df, aes(x = created, fill = bank)) +
 # Because we have kept text such as hashtags and usernames in the dataset, we can’t use a simple anti_join() to remove stop words. Instead, we can take the approach shown in the filter() line that uses str_detect() from the stringr package.
 
 remove_reg <- "&amp;|&lt;|&gt;"
-tidy_tweets <- big4_df %>% 
+tidy_tweets <- big4_df %>%
   filter(!str_detect(text, "^RT")) %>%
   mutate(text = str_remove_all(text, remove_reg)) %>%
   unnest_tokens(word, text, token = "tweets") %>%
@@ -150,11 +150,11 @@ tidy_tweets <- big4_df %>%
          !word %in% str_remove_all(stop_words$word, "'"),
          str_detect(word, "[a-z]"))
 
-frequency <- tidy_tweets %>% 
-  group_by(bank) %>% 
-  count(word, sort = TRUE) %>% 
-  left_join(tidy_tweets %>% 
-              group_by(bank) %>% 
+frequency <- tidy_tweets %>%
+  group_by(bank) %>%
+  count(word, sort = TRUE) %>%
+  left_join(tidy_tweets %>%
+              group_by(bank) %>%
               summarise(total = n())) %>%
   mutate(freq = n/total)
 
@@ -162,8 +162,8 @@ frequency
 
 library(tidyr)
 
-frequency <- frequency %>% 
-  select(bank, word, freq) %>% 
+frequency <- frequency %>%
+  select(bank, word, freq) %>%
   spread(bank, freq)
 
 frequency
@@ -188,7 +188,7 @@ word_ratios <- tidy_tweets %>%
   mutate(logratio = log(anz / cba)) %>%
   arrange(desc(logratio))
 
-word_ratios %>% 
+word_ratios %>%
   arrange(abs(logratio))
 
 word_ratios %>%
@@ -202,6 +202,96 @@ word_ratios %>%
   ylab("log odds ratio (David/Julia)") +
   scale_fill_discrete(name = "", labels = c("David", "Julia"))
 
+
+
+tidy_tweets$comment2 <-
+  tolower(tidy_tweets$word) %>%
+  str_replace_all("[^[:alpha:][:space:]]*", "") %>%
+  str_replace_all(c('last minute' = 'last_minute',
+                    'not helpful' = 'not_helpful',
+                    'not great' = 'not_great',
+                    'not satisfied' = 'not_satisfied',
+                    'not happy'='not_happy',
+                    'not accept'='not_accept',
+                    'not sign off'='not_sign_off'))
+
+filter_word <- tibble(word = c('anz','nab','anzau','commbank','westpac','settlement') )
+
+dtm <-
+  tidy_tweets %>%
+  select(bank,comment2) %>%
+  unnest_tokens(word, comment2) %>%
+  anti_join(stop_words, by = "word") %>%
+  anti_join(filter_word, by ="word") %>%
+  count(bank, word) %>%
+  cast_dtm(bank,word, n)
+
+## ----clustering----------------------------------------------------------
+library('tm')
+# remove sparse terms
+m2 <- dtm %>% removeSparseTerms(sparse=0.90) %>% as.matrix() %>% t()
+
+
+# calculate distance matrix
+dist.matrix <- m2 %>% scale() %>% dist()
+
+# hierarchical clustering
+fit <- dist.matrix %>% hclust(method="ward.D2")
+
+## ----plot-cluster, fig.width=8, fig.height=6, out.height='.9\\textwidth'----
+plot(fit)
+
+cluster_n <- 15
+# fit %>% rect.hclust(k=cluster_n) # cut tree into 6 clusters
+# groups <- fit %>% cutree(k=cluster_n)
+
+## ----topic modelling-----------------------------------------------------
+library(topicmodels)
+
+topic_n = 10
+
+# set a seed so that the output of the model is predictable
+ap_lda <- LDA(dtm, k = topic_n, control = list(seed = 1234))
+
+ap_topics <- tidy(ap_lda, matrix = "beta")
+# ap_td <- tidy(dtm)
+ap_topics
+
+top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+term <- terms(ap_lda, topic_n) # first 7 terms of every topic
+term <- apply(term, MARGIN=2, paste, collapse=", ") %>% print
+
+doc_topic <- as_tibble(rownames_to_column(data.frame(topics(ap_lda)),var = "bank")) %>% rename(lda_topic = topics.ap_lda.)
+topic_desc <- as_tibble(rownames_to_column(data.frame(term),var = "topic")) %>% separate(topic,c('name','lda_topic'),sep=' ') %>% mutate(lda_topic = as.numeric(lda_topic))
+
+doc_topic_desc <-
+  doc_topic %>%
+  left_join(topic_desc) %>%
+  select(-name)
+
+# tidy_tweets %>%
+#   select(bank,comment2,word) %>%
+#   left_join(doc_topic_desc) %>%
+#   ggplot(aes(y = word,x= lda_topic,group=lda_topic)) +
+#   geom_boxplot()
+
+
+rm(list=c('email_topic','topic_desc'))
+
+
+
 ## ----prepare-text, tidy=F------------------------------------------------
 library(tm)
 
@@ -209,17 +299,17 @@ library(tm)
 corpus.raw <- tweets.df$text %>% VectorSource() %>% Corpus()
 
 # text cleaning
-corpus.cleaned <- corpus.raw %>% 
+corpus.cleaned <- corpus.raw %>%
   # convert to lower case
-  tm_map(content_transformer(tolower)) %>% 
+  tm_map(content_transformer(tolower)) %>%
   # remove URLs
-  tm_map(content_transformer(removeURL)) %>% 
+  tm_map(content_transformer(removeURL)) %>%
   # remove numbers and punctuations
-  tm_map(content_transformer(removeNumPunct)) %>% 
+  tm_map(content_transformer(removeNumPunct)) %>%
   # remove stopwords
-  tm_map(removeWords, myStopwords) %>% 
+  tm_map(removeWords, myStopwords) %>%
   # remove extra whitespace
-  tm_map(stripWhitespace) 
+  tm_map(stripWhitespace)
 
 ## ----stemming and stem-completion, tidy=F--------------------------------
 ## stem words
@@ -234,8 +324,8 @@ stemCompletion2 <- function(x, dictionary) {
   stripWhitespace(x)
 }
 
-corpus.completed <- corpus.stemmed %>% 
-  lapply(stemCompletion2, dictionary=corpus.cleaned) %>% 
+corpus.completed <- corpus.stemmed %>%
+  lapply(stemCompletion2, dictionary=corpus.cleaned) %>%
   VectorSource() %>% Corpus()
 
 ## ----before/after text cleaning, tidy=F----------------------------------
@@ -255,12 +345,12 @@ replaceWord <- function(corpus, oldword, newword) {
   tm_map(corpus, content_transformer(gsub),
          pattern=oldword, replacement=newword)
 }
-corpus.completed <- corpus.completed %>% 
+corpus.completed <- corpus.completed %>%
   replaceWord("pexaaustralia", "pexa")
 
 ## ----term-doc-matrix, tidy=F---------------------------------------------
-tdm <- corpus.completed %>% 
-  TermDocumentMatrix(control = list(wordLengths = c(1, Inf)))  %>% 
+tdm <- corpus.completed %>%
+  TermDocumentMatrix(control = list(wordLengths = c(1, Inf)))  %>%
   print
 
 ## ----frequent-terms, out.truncate=70-------------------------------------
@@ -303,7 +393,7 @@ tdm %>% findAssocs('pexa', 0.2)
 library(graph)
 library(Rgraphviz)
 plot(tdm, term=freq.terms, corThreshold=0.3, weighting=T
-     ,attrs=list(node=list(label="foo", 
+     ,attrs=list(node=list(label="foo",
                           fillcolor="lightgreen",
                           fontsize=50,
                           height=1.8,
@@ -358,7 +448,7 @@ term <- apply(term, MARGIN=2, paste, collapse=", ") %>% print
 
 ## ----density-plot, tidy=F, fig.width=10, out.width="\\textwidth", out.height="0.5\\textwidth", fig.align='center', crop=T----
 rdm.topics <- topics(lda) # 1st topic identified for every document (tweet)
-rdm.topics <- data.frame(date=as.IDate(tweets.df$created), 
+rdm.topics <- data.frame(date=as.IDate(tweets.df$created),
                          topic=rdm.topics)
 ggplot(rdm.topics, aes(date, fill = term[topic])) +
   geom_density(position = "stack")
