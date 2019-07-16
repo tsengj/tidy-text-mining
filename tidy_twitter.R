@@ -4,8 +4,10 @@
 ## load tweets into R
 library('twitteR')
 library('tidyverse')
+library('tidytext')
 library('lubridate')
 library('SnowballC')
+library('tm')
 
 #authenticate using your login token
 consumerKey <- "NTMoENQJ4RQ4rSMTvGX0k0IuU"
@@ -15,18 +17,18 @@ accessTokenSecret <- "zUgHvnvJul6bqvLsESPkWFhdv2Ha4joLksj0j2yugGPM1"
 setup_twitter_oauth(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
 ##Retrieve tweets from Twitter
-searchstring <- hashtags <- c("@PEXA_AUSTRALIA", "#PEXA_AUSTRALIA") # @ANZ_AU @Westpac @NAB @CommBank
-searchstring <- paste(hashtags, collapse = " OR ")
+searchstring <- hashtags <- c("@CommBank") # @ANZ_AU @Westpac @NAB @CommBank
+# searchstring <- paste(hashtags, collapse = " OR ")
 tweets <- searchTwitter(searchstring, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
 rm(hashtags,searchstring)
 
 ## ----print-tweets, tidy=F------------------------------------------------
 (n.tweet <- tweets %>% length())
 # convert tweets to a data frame
-tweets.df <- tweets %>% twListToDF()
+tweets.df <- tweets %>% twListToDF() %>% as_tibble()
 # tweet #1
-tweets.df[1, c("id", "created", "screenName", "replyToSN",
-               "favoriteCount", "retweetCount", "longitude", "latitude", "text")]
+tweets.df[1, c("id", "created", "screenName", "replyToSN","favoriteCount", "retweetCount", "longitude", "latitude", "text")]
+
 # print tweet #1 and make text fit for slide width
 tweets.df$text[1] %>% strwrap(60) %>% writeLines()
 
@@ -39,13 +41,63 @@ remove_reg <- "https?://[^\\s]+|&amp;|&lt;|&gt;|\bRT\\b" #cleaning of twitter te
 
 tidy_tweets <-
   tweets.df %>%
+  select(id,created,text) %>%
   filter(!str_detect(text, "^RT")) %>% #remove tweets from this dataset that are retweets so that we only have tweets that we wrote ourselves
   mutate(text = str_remove_all(text, remove_reg), #remove odd characters
          created = ymd_hms(created)) %>% #update date format for use late
   unnest_tokens(word, text, token = "tweets") %>% #token is a variant that retains hashtag # and @ symbols.
-  mutate(word_stem = wordStem(word)) %>% #stemming of words (i.e. win, winning, winner)
+  filter(!str_detect(word, "@")) %>% #exclude authors
   filter(!word %in% stop_words$word,
          !word %in% str_remove_all(stop_words$word, "'"),
          str_detect(word, "[a-z]"))
 
+#word stemming
+tidy_stem <-
+  tidy_tweets %>%
+  mutate(word_stem = wordStem(word), #stemming of words (i.e. win, winning, winner)
+         word_stem = ifelse(stemCompletion(word_stem,dictionary=tidy_tweets$word, type = 'prevalent') !='',
+                       stemCompletion(word_stem,dictionary=tidy_tweets$word, type = 'prevalent'),
+                       word)) #complete the incomplete words consistently back to itself
 
+#common words
+tidy_stem %>%
+  count(word_stem, sort = TRUE) %>%
+  filter(n > 10) %>%
+  mutate(word_stem = reorder(word_stem, n)) %>%
+  ggplot(aes(word_stem, n)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip()
+
+#sentiments
+df_sentiment <-
+  tidy_stem[,c('id','created','word_stem')] %>%
+  rename(word = word_stem) %>%
+  mutate(response.date = as.factor(as.numeric(format(created,format ='%Y%m%d')))) %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(index = response.date, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+#plot sentiment timeseries
+ggplot(df_sentiment, aes(index, sentiment)) +
+  geom_col(show.legend = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  ggtitle("Sentiments Aggregated into Months")
+
+#Common Sentiments word
+tidy_stem[,c('id','created','word_stem')] %>%
+  rename(word = word_stem) %>%
+  mutate(response.date = as.factor(as.numeric(format(created,format ='%Y%m%d')))) %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word,sentiment) %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_grid(sentiment~., scales = "free_y") +
+  labs(y = "Contribution to sentiment",
+       x = NULL) +
+  coord_flip()
