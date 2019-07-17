@@ -230,28 +230,22 @@ bigram_tf_idf %>%
   coord_flip()
 
 #handling of negation words
-negation_words <- c("not", "no", "never", "without")
+# negation_words <- c("not", "no", "never", "without")
+negation_words <- c("anz", "cba", "westpac", "nab")
 
 neg_words <- df_bigrams_fil %>%
   filter(word1_stem %in% negation_words) %>%
   inner_join(get_sentiments("afinn"), by = c(word2_stem = "word")) %>%
-  count(word2_stem, score, sort = TRUE)
+  count(grp, word2_stem, value, sort = TRUE)
 
-
-negation_words <- c("not", "no", "never", "without")
-
-negated_words <- bigrams_separated %>%
-  filter(word1 %in% negation_words) %>%
-  inner_join(get_sentiments("afinn"), by = c(word2 = "word")) %>%
-  count(word1, word2, value, sort = TRUE)
-
-negated_words %>%
+neg_words %>%
   mutate(contribution = n * value) %>%
   arrange(desc(abs(contribution))) %>%
   head(20) %>%
-  mutate(word2 = reorder(word2, contribution)) %>%
-  ggplot(aes(word2, n * value, fill = n * value > 0)) +
+  mutate(word2_stem = reorder(word2_stem, contribution)) %>%
+  ggplot(aes(word2_stem, n * value, fill = n * value > 0)) +
   geom_col(show.legend = FALSE) +
+  facet_wrap(~grp, ncol = 2, scales = "free") +
   xlab("Words preceded by \"negation terms (not, no, never, without)\"") +
   ylab("Sentiment score * # of occurrences") +
   coord_flip()
