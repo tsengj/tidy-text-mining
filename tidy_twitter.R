@@ -18,24 +18,28 @@ setup_twitter_oauth(consumerKey, consumerSecret, accessToken, accessTokenSecret)
 
 ##Retrieve tweets from Twitter
 # searchstring <- hashtags <- c("@ANZ_AU") # @ANZ_AU @Westpac @NAB @CommBank
-searchstring1 <- hashtags <- c("@ANZ_AU") # @ANZ_AU @Westpac @NAB @CommBank
-searchstring2 <- hashtags <- c("@Westpac") # @ANZ_AU @Westpac @NAB @CommBank
-searchstring3 <- hashtags <- c("@NAB") # @ANZ_AU @Westpac @NAB @CommBank
-searchstring4 <- hashtags <- c("@CommBank") # @ANZ_AU @Westpac @NAB @CommBank
+searchstring1 <- hashtags <- c("@realDonaldTrump") # @ANZ_AU @Westpac @NAB @CommBank
+searchstring2 <- hashtags <- c("@BarackObama") # @ANZ_AU @Westpac @NAB @CommBank
+# searchstring3 <- hashtags <- c("@NAB") # @ANZ_AU @Westpac @NAB @CommBank
+# searchstring4 <- hashtags <- c("@CommBank") # @ANZ_AU @Westpac @NAB @CommBank
 # searchstring <- paste(hashtags, collapse = " OR ")
 tweets1 <- searchTwitter(searchstring1, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
 tweets2 <- searchTwitter(searchstring2, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
-tweets3 <- searchTwitter(searchstring3, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
-tweets4 <- searchTwitter(searchstring4, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
+# tweets3 <- searchTwitter(searchstring3, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
+# tweets4 <- searchTwitter(searchstring4, n = 3200) #since="2017-03-01", until="2017-04-07" , resultType = "popular"
 
 rm(hashtags,searchstring1,searchstring2,searchstring3,searchstring4)
 
-t1<-tweets1 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'anz')
-t2<-tweets2 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'wbc')
-t3<-tweets3 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'nab')
-t4<-tweets4 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'cba')
+t1<-tweets1 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'trump')
+t2<-tweets2 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'obama')
+# t3<-tweets3 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'nab')
+# t4<-tweets4 %>% twListToDF() %>% as_tibble() %>% mutate(grp = 'cba')
 
-tweets.df <- bind_rows(t1,t2,t3,t4)
+tweets.df <- bind_rows(t1
+                       ,t2
+                       # ,t3
+                       # ,t4
+                       )
 
 # write_rds(tweets.df,'./data/tweets_big4.rds')
 
@@ -56,7 +60,7 @@ tweets.df
 
 ## ----text cleaning functions, tidy=F-------------------------------------
 
-tweets.df <- read_rds('./data/tweets_big4.rds')
+# tweets.df <- read_rds('./data/tweets_big4.rds')
 
 remove_reg <- "https?://[^\\s]+|&amp;|&lt;|&gt;|\bRT\\b" #cleaning of twitter texts
 # mystopwords <- tibble(word = c("eq", "co", "rc", "ac", "ak", "bn", "fig", "file", "cg", "cb", "cm"))
@@ -160,7 +164,7 @@ tidy_stem[,c('grp','word_stem')] %>%
   inner_join(get_sentiments("bing")) %>%
   count(grp,word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment + grp, value.var = "n", fill = 0) %>%
-  comparison.cloud(colors = c("red","brown","gold","deeppink3", "blue","cyan","darkseagreen","deepskyblue2"),
+  comparison.cloud(colors = c("red","brown","gold","blue","green"), #extend colours as required
                    max.words = 1500)
 
 #important key words used frequently within each group but not across group.
@@ -188,7 +192,8 @@ df_bigrams <-
   tweets.df %>%
   select(grp,text) %>%
   filter(!str_detect(text, "^RT")) %>% #remove tweets from this dataset that are retweets so that we only have tweets that we wrote ourselves
-  mutate(text = str_remove_all(text, remove_reg)) %>% #remove odd characters
+  mutate(text = gsub(" ?@\\w+ ?", "", text), #remove authors from text
+         text = str_remove_all(text, remove_reg)) %>% #remove odd characters
   unnest_tokens(word, text, token = "ngrams", n = 2) #token is a variant that retains hashtag # and @ symbols.
 
 
@@ -230,8 +235,7 @@ bigram_tf_idf %>%
   coord_flip()
 
 #handling of negation words
-# negation_words <- c("not", "no", "never", "without")
-negation_words <- c("anz", "cba", "westpac", "nab")
+negation_words <- c("not", "no", "never", "without")
 
 neg_words <- df_bigrams_fil %>%
   filter(word1_stem %in% negation_words) %>%
@@ -250,5 +254,59 @@ neg_words %>%
   ylab("Sentiment score * # of occurrences") +
   coord_flip()
 
+# filter for only relatively common combinations
+# new bigram counts:
 
+library(igraph)
+
+bigram_graph <-
+  df_bigrams_fil %>%
+  count(grp, word1_stem, word2_stem, sort = TRUE) %>%
+  filter(n > 1) %>%
+  graph_from_data_frame()
+
+library(ggraph)
+set.seed(2017)
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+
+set.seed(2016)
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+
+df_txt$comment2 <-
+  tolower(df_txt$p2p.my.bank.comment) %>%
+  str_replace_all("[^[:alpha:][:space:]]*", "") %>%
+  str_replace_all(
+    c(
+      'not good' = 'not_good',
+      'not like' = 'not_like',
+      'not happy' = 'not_happy',
+      'not bad' = 'not_bad',
+      'not mandatory' = 'not_mandatory',
+      'no advantage' = 'no_advantage',
+      'no delays' = 'no_delays',
+      "last minute" = "last_minute",
+      "didnt sign" = "didnt_sign",
+      'last minute' = 'last_minute',
+      'not helpful' = 'not_helpful',
+      'not great' = 'not_great',
+      'not satisfied' = 'not_satisfied',
+      'not happy' = 'not_happy',
+      'not accept' = 'not_accept',
+      'no issues' = 'no_issues',
+      'not sign' = 'not_sign'
+    )
+  )
 
