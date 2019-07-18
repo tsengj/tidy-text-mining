@@ -42,6 +42,7 @@ tweets.df <- bind_rows(t1
                        )
 
 # write_rds(tweets.df,'./data/tweets_big4.rds')
+# write_rds(tweets.df,'./data/tweets_bo_do.rds')
 
 rm(hashtags,searchstring1,searchstring2,searchstring3,searchstring4,t1,t2,t3,t4,tweets1,tweets2,tweets3,tweets4)
 
@@ -234,6 +235,34 @@ bigram_tf_idf %>%
   facet_wrap(~grp, ncol = 2, scales = "free") +
   coord_flip()
 
+
+#update unique bi-gram words
+df_txt$comment2 <-
+  tolower(df_txt$p2p.my.bank.comment) %>%
+  str_replace_all("[^[:alpha:][:space:]]*", "") %>%
+  str_replace_all(
+    c(
+      'not good' = 'not_good',
+      'not like' = 'not_like',
+      'not happy' = 'not_happy',
+      'not bad' = 'not_bad',
+      'not mandatory' = 'not_mandatory',
+      'no advantage' = 'no_advantage',
+      'no delays' = 'no_delays',
+      "last minute" = "last_minute",
+      "didnt sign" = "didnt_sign",
+      'last minute' = 'last_minute',
+      'not helpful' = 'not_helpful',
+      'not great' = 'not_great',
+      'not satisfied' = 'not_satisfied',
+      'not happy' = 'not_happy',
+      'not accept' = 'not_accept',
+      'no issues' = 'no_issues',
+      'not sign' = 'not_sign'
+    )
+  )
+
+
 #handling of negation words
 negation_words <- c("not", "no", "never", "without")
 
@@ -253,6 +282,32 @@ neg_words %>%
   xlab("Words preceded by \"negation terms (not, no, never, without)\"") +
   ylab("Sentiment score * # of occurrences") +
   coord_flip()
+
+#update unique bi-gram words
+df_txt$comment2 <-
+  tolower(df_txt$p2p.my.bank.comment) %>%
+  str_replace_all("[^[:alpha:][:space:]]*", "") %>%
+  str_replace_all(
+    c(
+      'not good' = 'not_good',
+      'not like' = 'not_like',
+      'not happy' = 'not_happy',
+      'not bad' = 'not_bad',
+      'not mandatory' = 'not_mandatory',
+      'no advantage' = 'no_advantage',
+      'no delays' = 'no_delays',
+      "last minute" = "last_minute",
+      "didnt sign" = "didnt_sign",
+      'last minute' = 'last_minute',
+      'not helpful' = 'not_helpful',
+      'not great' = 'not_great',
+      'not satisfied' = 'not_satisfied',
+      'not happy' = 'not_happy',
+      'not accept' = 'not_accept',
+      'no issues' = 'no_issues',
+      'not sign' = 'not_sign'
+    )
+  )
 
 # filter for only relatively common combinations
 # new bigram counts:
@@ -285,28 +340,67 @@ ggraph(bigram_graph, layout = "fr") +
   theme_void()
 
 
-df_txt$comment2 <-
-  tolower(df_txt$p2p.my.bank.comment) %>%
-  str_replace_all("[^[:alpha:][:space:]]*", "") %>%
-  str_replace_all(
-    c(
-      'not good' = 'not_good',
-      'not like' = 'not_like',
-      'not happy' = 'not_happy',
-      'not bad' = 'not_bad',
-      'not mandatory' = 'not_mandatory',
-      'no advantage' = 'no_advantage',
-      'no delays' = 'no_delays',
-      "last minute" = "last_minute",
-      "didnt sign" = "didnt_sign",
-      'last minute' = 'last_minute',
-      'not helpful' = 'not_helpful',
-      'not great' = 'not_great',
-      'not satisfied' = 'not_satisfied',
-      'not happy' = 'not_happy',
-      'not accept' = 'not_accept',
-      'no issues' = 'no_issues',
-      'not sign' = 'not_sign'
-    )
-  )
+dtm <-
+  tidy_stem[tidy_stem$grp=='trump',c('id','word_stem')] %>%
+  rename(word=word_stem) %>%
+  anti_join(stop_words, by = "word") %>%
+  count(id, word) %>%
+  cast_dtm(id,word, n)
+
+
+## ----topic modelling-----------------------------------------------------
+library(topicmodels)
+topic_n =15
+
+ap_lda <- LDA(dtm, k = topic_n, control = list(seed = 1234))
+
+ap_topics <- tidy(ap_lda, matrix = "beta")
+# ap_td <- tidy(dtm)
+
+top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+# export image
+# ggsave('./charts/lda_cluster_wbc_top10.png',
+#        width = 10,
+#        height = 10,
+#        dpi = 500,
+#        units = "in",
+#        device='png'
+# )
+
+term <- terms(ap_lda, topic_n) # first 7 terms of every topic
+term <- apply(term, MARGIN=2, paste, collapse=", ") %>% print
+
+id_topic <- as_tibble(rownames_to_column(data.frame(topics(ap_lda)),var = "id")) %>% rename(lda_topic = topics.ap_lda.)
+topic_desc <- as_tibble(rownames_to_column(data.frame(term),var = "topic")) %>% separate(topic,c('name','lda_topic'),sep=' ') %>% mutate(lda_topic = as.numeric(lda_topic))
+
+id_topic_desc <-
+  id_topic %>%
+  left_join(topic_desc) %>%
+  select(-name) %>%
+  mutate(id = as.character(id))
+
+#put topics into dataset
+tidy_stem[tidy_stem$grp=='trump',c('id','word_stem')] %>%
+  mutate(id2 = row_number()) %>%
+  inner_join(id_topic_desc)
+
+# ggsave('./charts/lda_cluster_nps_box.png',
+#        width = 10,
+#        height = 10,
+#        dpi = 500,
+#        units = "in",
+#        device='png'
+# )
 
